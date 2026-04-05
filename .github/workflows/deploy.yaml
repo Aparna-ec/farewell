@@ -1,0 +1,41 @@
+name: Build and Deploy All Variants
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - uses: subosito/flutter-action@v2
+      with:
+        flutter-version: '3.27.2'
+    
+    - name: Install dependencies
+      run: flutter pub get
+      working-directory: seniors
+    
+    - name: Create output directory
+      run: mkdir -p build_output
+      working-directory: seniors
+    
+    - name: Build all 21 variants
+      run: |
+        for i in {1..21}; do
+          echo "Building variant $i..."
+          flutter build web \
+            --dart-define=PERSON_ID=$i \
+            --output "build_output/person_$i"
+        done
+      working-directory: seniors
+    
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./seniors/build_output
