@@ -53,22 +53,43 @@ class LoadingScreen extends StatefulWidget {
 class _LoadingScreenState extends State<LoadingScreen> {
   ImageProvider? _photoImage;
   bool _isLoading = true;
+  String? _error;
+
+  bool _didLoad = false;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
+    // Do not call _loadData here!
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_didLoad) {
+      _didLoad = true;
+      _loadData();
+    }
   }
 
   Future<void> _loadData() async {
-    final photoAsset = widget.config['photo'] as String;
-    final image = AssetImage(photoAsset);
-    await precacheImage(image, context);
-
-    setState(() {
-      _photoImage = image;
-      _isLoading = false;
-    });
+    try {
+      final photoAsset = widget.config['photo'] as String?;
+      if (photoAsset == null || photoAsset.isEmpty) {
+        throw Exception('Photo asset missing in config.');
+      }
+      final image = AssetImage(photoAsset);
+      await precacheImage(image, context);
+      setState(() {
+        _photoImage = image;
+        _isLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load data: \n${e.toString()}';
+        _isLoading = false;
+      });
+    }
   }
 
   @override
@@ -88,11 +109,22 @@ class _LoadingScreenState extends State<LoadingScreen> {
           ),
         ),
       );
+    } else if (_error != null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9F3E6),
+        body: Center(
+          child: Text(
+            _error!,
+            style: const TextStyle(color: Colors.red, fontSize: 18),
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
     } else {
       return GiftScreen(
         photoImage: _photoImage!,
-        name: widget.config['name'] as String,
-        bannerText: widget.config['bannerText'] as String,
+        name: widget.config['name'] as String? ?? '',
+        bannerText: widget.config['bannerText'] as String? ?? '',
       );
     }
   }
@@ -287,19 +319,20 @@ class _GiftScreenState extends State<GiftScreen> with SingleTickerProviderStateM
                         const SizedBox(height: 32),
 
                         // Send Love Button
-                        ElevatedButton.icon(
-                          onPressed: _sendLove,
-                          icon: const Icon(Icons.favorite),
-                          label: const Text('Send Love'),
-                          style: ElevatedButton.styleFrom(
-                            primary: const Color(0xFFFFC857),
-                            onPrimary: const Color(0xFF003B5C),
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                          ),
-                        ),
+                      // Send Love Button
+                       ElevatedButton.icon(
+                         onPressed: _sendLove,
+                         icon: const Icon(Icons.favorite),
+                         label: const Text('Send Love'),
+                         style: ElevatedButton.styleFrom(
+                           backgroundColor: const Color(0xFFFFC857),
+                           foregroundColor: const Color(0xFF003B5C),
+                           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                           shape: RoundedRectangleBorder(
+                             borderRadius: BorderRadius.circular(30),
+                             ),
+                           ),
+                        ), 
                       ],
                     ),
                   ),
@@ -324,7 +357,7 @@ class _GiftScreenState extends State<GiftScreen> with SingleTickerProviderStateM
                       onTap: () {},
                       child: Container(
                         width: MediaQuery.of(context).size.width * 0.9,
-                        maxWidth: 400,
+                        constraints: const BoxConstraints(maxWidth: 400),
                         padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
                           color: Colors.white,
