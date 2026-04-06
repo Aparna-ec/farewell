@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
   pages: write
   id-token: write
 
@@ -23,23 +22,117 @@ jobs:
       with:
         flutter-version: '3.27.2'
     
+    - name: Cache Flutter dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.pub-cache
+          .dart_tool
+        key: ${{ runner.os }}-flutter-3.27.2-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-flutter-
+    
     - name: Install dependencies
       run: flutter pub get
     
     - name: Create output directory
       run: mkdir -p build_output
     
-    - name: Build all 21 variants
+    - name: Build all 21 variants with validation
       shell: bash
       run: |
+        set -e
+        FAILED_BUILDS=()
+        
         for i in {1..21}; do
+          echo "================================"
           echo "Building variant $i..."
-          flutter build web \
+          echo "================================"
+          
+          OUTPUT_DIR="./build_output/person_$i"
+          
+          # Clean previous build if exists
+          if [ -d "$OUTPUT_DIR" ]; then
+            rm -rf "$OUTPUT_DIR"
+          fi
+          
+          # Build with error checking
+          if flutter build web \
             --dart-define=PERSON_ID=$i \
-            --output "./build_output/person_$i/"
+            --output "$OUTPUT_DIR" \
+            --release; then
+            echo "✓ Variant $i build completed"
+          else
+            echo "✗ Variant $i build FAILED"
+            FAILED_BUILDS+=($i)
+            continue
+          fi
+          
+          # Validate build output structure
+          if [ ! -f "$OUTPUT_DIR/index.html" ]; then
+            echo "✗ Variant $i: Missing index.html at root"
+            FAILED_BUILDS+=($i)
+            continue
+          fi
+          
+          # Check for critical Flutter web files
+          if [ ! -d "$OUTPUT_DIR/assets" ]; then
+            echo "⚠ Warning: Variant $i missing assets directory"
+          fi
+          
+          if [ ! -f "$OUTPUT_DIR/main.dart.js" ]; then
+            echo "⚠ Warning: Variant $i missing main.dart.js"
+          fi
+          
+          # Verify index.html is not empty
+          if [ ! -s "$OUTPUT_DIR/index.html" ]; then
+            echo "✗ Variant $i: index.html is empty"
+            FAILED_BUILDS+=($i)
+            continue
+          fi
+          
+          echo "✓ Variant $i validation passed"
         done
+        
+        echo ""
+        echo "================================"
+        echo "Build Summary"
+        echo "================================"
+        
+        if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
+          echo "Failed builds: ${FAILED_BUILDS[@]}"
+          exit 1
+        else
+          echo "✓ All 21 variants built and validated successfully"
+        fi
     
-    - name: Upload artifact
+    - name: Verify build output structure
+      shell: bash
+      run: |
+        echo "Verifying final build output structure..."
+        
+        BUILD_COUNT=0
+        for dir in build_output/person_*/; do
+          if [ -f "$dir/index.html" ]; then
+            BUILD_COUNT=$((BUILD_COUNT + 1))
+          fi
+        done
+        
+        echo "Found $BUILD_COUNT valid builds"
+        
+        if [ $BUILD_COUNT -ne 21 ]; then
+          echo "ERROR: Expected 21 builds, found $BUILD_COUNT"
+          exit 1
+        fi
+        
+        echo "✓ Build structure verification passed"
+        
+        # Display directory listing for verification
+        echo ""
+        echo "Build output structure:"
+        ls -lh build_output/
+    
+    - name: Upload artifact to GitHub Pages
       uses: actions/upload-pages-artifact@v3
       with:
         path: './build_output'
