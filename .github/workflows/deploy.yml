@@ -6,44 +6,344 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
   pages: write
   id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Flutter
       uses: subosito/flutter-action@v2
       with:
         flutter-version: '3.27.2'
-    
+
+    - name: Cache Flutter dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.pub-cache
+          .dart_tool
+        key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-flutter-
+
     - name: Install dependencies
       run: flutter pub get
-    
+
     - name: Create output directory
       run: mkdir -p build_output
-    
-    - name: Build all 21 variants
+
+    - name: Build all 21 variants with validation
       shell: bash
       run: |
+        set -e
+        FAILED_BUILDS=()
+
         for i in {1..21}; do
+          echo "================================"
           echo "Building variant $i..."
-          flutter build web \
+          echo "================================"
+
+          OUTPUT_DIR="./build_output/person_$i"
+
+          if [ -d "$OUTPUT_DIR" ]; then
+            rm -rf "$OUTPUT_DIR"
+          fi
+
+          if flutter build web \
             --dart-define=PERSON_ID=$i \
-            --output "./build_output/person_$i/"
+            --output "$OUTPUT_DIR" \
+            --release; then
+            echo "✓ Variant $i build completed"
+          else
+            echo "✗ Variant $i build FAILED"
+            FAILED_BUILDS+=($i)
+            continue
+          fi
+
+          if [ ! -f "$OUTPUT_DIR/index.html" ]; then
+            echo "✗ Variant $i: Missing index.html at root"
+            FAILED_BUILDS+=($i)
+            continue
+          fi
+
+          if [ ! -s "$OUTPUT_DIR/index.html" ]; then
+            echo "✗ Variant $i: index.html is empty"
+            FAILED_BUILDS+=($i)
+            continue
+          fi
+
+          echo "✓ Variant $i validation passed"
         done
-    
-    - name: Upload artifact
+
+        echo ""
+        echo "================================"
+        echo "Build Summary"
+        echo "================================"
+
+        if [ ${#FAILED_BUILDS[@]} -gt 0 ]; then
+          echo "Failed builds: ${FAILED_BUILDS[@]}"
+          exit 1
+        else
+          echo "✓ All 21 variants built and validated successfully"
+        fi
+
+    - name: Verify build output structure
+      shell: bash
+      run: |
+        echo "Verifying final build output structure..."
+
+        BUILD_COUNT=0
+        for dir in build_output/person_*/; do
+          if [ -f "$dir/index.html" ]; then
+            ((BUILD_COUNT++))
+          fi
+        done
+
+        echo "Found $BUILD_COUNT valid builds"
+
+        if [ $BUILD_COUNT -ne 21 ]; then
+          echo "ERROR: Expected 21 builds, found $BUILD_COUNT"
+          exit 1
+        fi
+
+        echo "✓ Build structure verification passed"
+        echo ""
+        echo "Build output structure:"
+        ls -lh build_output/ | head -25
+
+    - name: Generate root landing page
+      shell: bash
+      run: |
+        cat > build_output/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+          <title>IEEE MACE '26 Farewell Gift</title>
+          <style>
+            *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+            body {
+              font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+              min-height: 100vh;
+              background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+              color: #e0e0e0;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              padding: 40px 20px 60px;
+            }
+
+            header {
+              text-align: center;
+              margin-bottom: 48px;
+            }
+
+            header .emoji { font-size: 3rem; display: block; margin-bottom: 12px; }
+
+            header h1 {
+              font-size: clamp(1.8rem, 5vw, 2.8rem);
+              font-weight: 700;
+              background: linear-gradient(90deg, #e0c3fc, #8ec5fc);
+              -webkit-background-clip: text;
+              -webkit-text-fill-color: transparent;
+              background-clip: text;
+              margin-bottom: 10px;
+            }
+
+            header p {
+              font-size: 1.05rem;
+              color: #a0aec0;
+              max-width: 480px;
+              margin: 0 auto;
+              line-height: 1.6;
+            }
+
+            .grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+              gap: 16px;
+              width: 100%;
+              max-width: 900px;
+            }
+
+            .card {
+              background: rgba(255, 255, 255, 0.07);
+              border: 1px solid rgba(255, 255, 255, 0.12);
+              border-radius: 14px;
+              padding: 24px 16px;
+              text-align: center;
+              text-decoration: none;
+              color: inherit;
+              transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              gap: 10px;
+            }
+
+            .card:hover {
+              transform: translateY(-4px);
+              background: rgba(255, 255, 255, 0.14);
+              box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+            }
+
+            .card .icon { font-size: 1.8rem; }
+
+            .card .label {
+              font-size: 0.95rem;
+              font-weight: 600;
+              color: #e2e8f0;
+            }
+
+            .card .sublabel {
+              font-size: 0.75rem;
+              color: #718096;
+            }
+
+            footer {
+              margin-top: 56px;
+              text-align: center;
+              font-size: 0.82rem;
+              color: #4a5568;
+            }
+          </style>
+        </head>
+        <body>
+          <header>
+            <span class="emoji">🎓</span>
+            <h1>IEEE MACE '26 Farewell Gift</h1>
+            <p>A personalized farewell message for each senior. Select a gift below to open it!</p>
+          </header>
+
+          <div class="grid">
+            <a class="card" href="person_1/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 1</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_2/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 2</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_3/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 3</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_4/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 4</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_5/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 5</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_6/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 6</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_7/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 7</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_8/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 8</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_9/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 9</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_10/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 10</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_11/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 11</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_12/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 12</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_13/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 13</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_14/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 14</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_15/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 15</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_16/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 16</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_17/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 17</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_18/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 18</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_19/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 19</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_20/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 20</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+            <a class="card" href="person_21/">
+              <span class="icon">🎁</span>
+              <span class="label">Senior 21</span>
+              <span class="sublabel">Open gift</span>
+            </a>
+          </div>
+
+          <footer>
+            <p>Made with ❤️ by IEEE MACE SB &nbsp;|&nbsp; Farewell '26</p>
+          </footer>
+        </body>
+        </html>
+        EOF
+        echo "✓ Root landing page generated at build_output/index.html"
+
+    - name: Upload artifact to GitHub Pages
       uses: actions/upload-pages-artifact@v3
       with:
         path: './build_output'
-    
+
     - name: Deploy to GitHub Pages
       id: deployment
       uses: actions/deploy-pages@v4
